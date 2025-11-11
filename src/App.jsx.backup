@@ -1,0 +1,1639 @@
+ import React, { useState, useEffect, useMemo } from 'react';
+
+import localforage from 'https://cdn.skypack.dev/localforage';
+
+import {
+
+  Shirt,
+
+  Trash2,
+
+  Plus,
+
+  Shuffle,
+
+  Package,
+
+  Clapperboard,
+
+  Check,
+
+  ImageOff,
+
+  Link,
+
+} from 'lucide-react';
+
+
+// --- Configuração do localForage ---
+
+// Configura a base de dados local no teu browser
+
+localforage.config({
+
+  name: 'virtualWardrobe',
+
+  storeName: 'wardrobe_data',
+
+  description: 'My local wardrobe items and outfits',
+
+});
+
+
+// --- Helper Components ---
+
+
+/**
+
+ * A fallback for images that fail to load.
+
+ * This component now enforces a 1:1 aspect ratio and full width of its container.
+
+ */
+
+const ImageWithFallback = ({ src, alt, className = '' }) => {
+
+  const [error, setError] = useState(false);
+
+  // Track invalid src state
+
+  const [isInvalidSrc, setIsInvalidSrc] = useState(false);
+
+
+  useEffect(() => {
+
+    // Re-evaluate when src changes
+
+    setIsInvalidSrc(!src || (typeof src === 'string' && src.length < 100));
+
+    setError(false); // Reset error on src change
+
+  }, [src]);
+
+
+  const handleError = () => {
+
+    setError(true);
+
+  };
+
+
+  const placeholder = (
+
+    <div
+
+      className={`flex items-center justify-center bg-gray-200 text-gray-500 rounded-lg w-full aspect-square ${className}`}
+
+    >
+
+      <ImageOff size={24} />
+
+    </div>
+
+  );
+
+
+  // We apply aspect-square and object-cover by default
+
+  return error || isInvalidSrc ? (
+
+    placeholder
+
+  ) : (
+
+    <img
+
+      src={src}
+
+      alt={alt}
+
+      className={`w-full aspect-square object-cover ${className}`}
+
+      onError={handleError}
+
+    />
+
+  );
+
+};
+
+
+/**
+
+ * Converte um ficheiro para Base64 (string)
+
+ */
+
+const fileToBase64 = (file) => {
+
+  return new Promise((resolve, reject) => {
+
+    const reader = new FileReader();
+
+    reader.readAsDataURL(file);
+
+    reader.onload = () => resolve(reader.result);
+
+    reader.onerror = (error) => reject(error);
+
+  });
+
+};
+
+
+/**
+
+ * Main Application Component
+
+ */
+
+export default function App() {
+
+  // --- State ---
+
+  const [currentView, setCurrentView] = useState('wardrobe'); // 'wardrobe', 'outfits', 'generate', 'pairings'
+
+
+  // Data state
+
+  const [items, setItems] = useState([]);
+
+  const [outfits, setOutfits] = useState([]);
+
+  const [loading, setLoading] = useState(true);
+
+
+  // Form state (Add Item)
+
+  const [newItemName, setNewItemName] = useState('');
+
+  const [newItemFile, setNewItemFile] = useState(null);
+
+  const [newItemCategory, setNewItemCategory] = useState('Top');
+
+  const [isUploading, setIsUploading] = useState(false); // (Agora é 'converting')
+
+
+  // Form state (Create Outfit)
+
+  const [newOutfitName, setNewOutfitName] = useState('');
+
+  const [selectedItemIds, setSelectedItemIds] = useState([]);
+
+
+  // Generator state
+
+  const [generatedOutfit, setGeneratedOutfit] = useState(null);
+
+  const [generatorError, setGeneratorError] = useState(null);
+
+
+  // Pairings state
+
+  const [selectedTopId, setSelectedTopId] = useState(null);
+
+  const [selectedBottomId, setSelectedBottomId] = useState(null);
+
+
+  const ITEM_CATEGORIES = [
+
+    'Top',
+
+    'Bottom',
+
+    'Shoes',
+
+    'Outerwear',
+
+    'Accessory',
+
+  ];
+
+
+  // --- Load Data From localForage Effect ---
+
+  useEffect(() => {
+
+    const loadData = async () => {
+
+      setLoading(true);
+
+      try {
+
+        const storedItems = (await localforage.getItem('wardrobeItems')) || [];
+
+        const storedOutfits =
+
+          (await localforage.getItem('wardrobeOutfits')) || [];
+
+
+        setItems(storedItems);
+
+        setOutfits(storedOutfits);
+
+        console.log('Data loaded from local storage:', {
+
+          storedItems,
+
+          storedOutfits,
+
+        });
+
+      } catch (error) {
+
+        console.error('Error loading data from localForage:', error);
+
+      } finally {
+
+        setLoading(false);
+
+      }
+
+    };
+
+
+    loadData();
+
+  }, []);
+
+
+  // --- Event Handlers ---
+
+
+  /**
+
+   * Add a new item to the wardrobe
+
+   */
+
+  const handleAddItem = async (e) => {
+
+    e.preventDefault();
+
+    if (!newItemName.trim() || !newItemFile) return;
+
+
+    setIsUploading(true); // Usamos isto para mostrar feedback de "loading"
+
+
+    try {
+
+      // 1. Converter o ficheiro para Base64
+
+      const imageUrl = await fileToBase64(newItemFile);
+
+
+      // 2. Criar o novo item
+
+      const newItem = {
+
+        id: `item_${Date.now()}`, // ID local único
+
+        name: newItemName,
+
+        imageUrl: imageUrl, // Guardamos a string Base64
+
+        category: newItemCategory,
+
+      };
+
+
+      // 3. Atualizar o estado e guardar no localForage
+
+      const newItemsList = [...items, newItem];
+
+      setItems(newItemsList);
+
+      await localforage.setItem('wardrobeItems', newItemsList);
+
+
+      console.log('Item added:', newItem);
+
+
+      // 4. Reset form
+
+      setNewItemName('');
+
+      setNewItemFile(null);
+
+      setNewItemCategory('Top');
+
+
+      // Resetar o input do ficheiro (importante!)
+
+      e.target.reset();
+
+    } catch (error) {
+
+      console.error('Error adding item:', error);
+
+    } finally {
+
+      setIsUploading(false);
+
+    }
+
+  };
+
+
+  /**
+
+   * Delete an item from the wardrobe
+
+   */
+
+  const handleDeleteItem = async (itemId) => {
+
+    try {
+
+      const newItemsList = items.filter((item) => item.id !== itemId);
+
+      setItems(newItemsList);
+
+      await localforage.setItem('wardrobeItems', newItemsList);
+
+
+      console.log('Item deleted:', itemId);
+
+    } catch (error) {
+
+      console.error('Error deleting item:', error);
+
+    }
+
+  };
+
+
+  /**
+
+   * Toggle selection of an item for a new outfit
+
+   */
+
+  const toggleItemSelection = (itemId) => {
+
+    setSelectedItemIds((prev) =>
+
+      prev.includes(itemId)
+
+        ? prev.filter((id) => id !== itemId)
+
+        : [...prev, itemId]
+
+    );
+
+  };
+
+
+  /**
+
+   * Save the currently selected items as a new outfit
+
+   */
+
+  const handleSaveOutfit = async (e) => {
+
+    e.preventDefault();
+
+    if (!newOutfitName.trim() || selectedItemIds.length === 0) return;
+
+
+    const newOutfit = {
+
+      id: `outfit_${Date.now()}`,
+
+      name: newOutfitName,
+
+      itemIds: selectedItemIds,
+
+    };
+
+
+    try {
+
+      const newOutfitsList = [...outfits, newOutfit];
+
+      setOutfits(newOutfitsList);
+
+      await localforage.setItem('wardrobeOutfits', newOutfitsList);
+
+
+      console.log('Outfit saved:', newOutfit);
+
+
+      // Reset form
+
+      setNewOutfitName('');
+
+      setSelectedItemIds([]);
+
+    } catch (error) {
+
+      console.error('Error saving outfit:', error);
+
+    }
+
+  };
+
+
+  /**
+
+   * Delete a saved outfit
+
+   */
+
+  const handleDeleteOutfit = async (outfitId) => {
+
+    try {
+
+      const newOutfitsList = outfits.filter(
+
+        (outfit) => outfit.id !== outfitId
+
+      );
+
+      setOutfits(newOutfitsList);
+
+      await localforage.setItem('wardrobeOutfits', newOutfitsList);
+
+      console.log('Outfit deleted:', outfitId);
+
+    } catch (error) {
+
+      console.error('Error deleting outfit:', error);
+
+    }
+
+  };
+
+
+  /**
+
+   * Generate a random outfit
+
+   */
+
+  const handleGenerateOutfit = () => {
+
+    setGeneratorError(null);
+
+    setGeneratedOutfit(null);
+
+
+    const tops = items.filter((i) => i.category === 'Top');
+
+    const bottoms = items.filter((i) => i.category === 'Bottom');
+
+    const shoes = items.filter((i) => i.category === 'Shoes');
+
+
+    if (tops.length === 0 || bottoms.length === 0 || shoes.length === 0) {
+
+      setGeneratorError(
+
+        "Please add at least one 'Top', 'Bottom', and 'Shoe' to use the generator."
+
+      );
+
+      return;
+
+    }
+
+
+    const randomTop = tops[Math.floor(Math.random() * tops.length)];
+
+    const randomBottom = bottoms[Math.floor(Math.random() * bottoms.length)];
+
+    const randomShoe = shoes[Math.floor(Math.random() * shoes.length)];
+
+
+    setGeneratedOutfit({
+
+      top: randomTop,
+
+      bottom: randomBottom,
+
+      shoe: randomShoe,
+
+    });
+
+  };
+
+
+  /**
+
+   * Select a Top for the Pairings view
+
+   */
+
+  const handleSelectTop = (id) => {
+
+    setSelectedTopId(id);
+
+    setSelectedBottomId(null); // Clear other selection
+
+  };
+
+
+  /**
+
+   * Select a Bottom for the Pairings view
+
+   */
+
+  const handleSelectBottom = (id) => {
+
+    setSelectedBottomId(id);
+
+    setSelectedTopId(null); // Clear other selection
+
+  };
+
+
+  /**
+
+   * Clear all selections in the Pairings view
+
+   */
+
+  const clearPairingSelection = () => {
+
+    setSelectedTopId(null);
+
+    setSelectedBottomId(null);
+
+  };
+
+
+  /**
+
+   * Handle changing the main view
+
+   */
+
+  const changeView = (view) => {
+
+    setCurrentView(view);
+
+    clearPairingSelection(); // Reset pairings when changing views
+
+  };
+
+
+  // --- Memoized Values ---
+
+
+  // Group items by category for easier browsing
+
+  const itemsByCategory = useMemo(() => {
+
+    return items.reduce((acc, item) => {
+
+      (acc[item.category] = acc[item.category] || []).push(item);
+
+      return acc;
+
+    }, {});
+
+  }, [items]);
+
+
+  // Map outfits to their full item details
+
+  const outfitsWithItems = useMemo(() => {
+
+    return outfits
+
+      .map((outfit) => ({
+
+        ...outfit,
+
+        items: outfit.itemIds
+
+          .map((id) => items.find((item) => item.id === id))
+
+          .filter(Boolean), // .filter(Boolean) removes any undefined items if an item was deleted
+
+      }))
+
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+  }, [outfits, items]);
+
+
+  // Get separate arrays for tops and bottoms for the Pairings view
+
+  const tops = useMemo(() => items.filter((i) => i.category === 'Top'), [items]);
+
+  const bottoms = useMemo(
+
+    () => items.filter((i) => i.category === 'Bottom'),
+
+    [items]
+
+  );
+
+
+  // --- Helper Render Components ---
+
+
+  /**
+
+   * Renders a loading spinner/message
+
+   */
+
+  const renderLoading = () => (
+
+    <div className="flex justify-center items-center h-64">
+
+      <p className="text-gray-500">Loading your wardrobe...</p>
+
+    </div>
+
+  );
+
+
+  /**
+
+   * Render the 'Wardrobe' view
+
+   */
+
+  const renderWardrobeView = () => (
+
+    <div>
+
+      {/* Add New Item Form */}
+
+      <div className="bg-white p-6 rounded-lg shadow-md mb-8">
+
+        <h2 className="text-2xl font-semibold mb-4 text-gray-800">
+
+          Add New Item
+
+        </h2>
+
+        <form
+
+          onSubmit={handleAddItem}
+
+          className="grid grid-cols-1 md:grid-cols-3 gap-4"
+
+        >
+
+          <input
+
+            type="text"
+
+            value={newItemName}
+
+            onChange={(e) => setNewItemName(e.target.value)}
+
+            placeholder="Item Name (e.g., 'Red T-Shirt')"
+
+            className="p-3 border border-gray-300 rounded-lg w-full"
+
+            required
+
+          />
+
+          <input
+
+            type="file"
+
+            accept="image/*"
+
+            onChange={(e) => setNewItemFile(e.target.files[0])}
+
+            className="p-3 border border-gray-300 rounded-lg w-full file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+
+            required
+
+          />
+
+          <div className="flex gap-4">
+
+            <select
+
+              value={newItemCategory}
+
+              onChange={(e) => setNewItemCategory(e.target.value)}
+
+              className="p-3 border border-gray-300 rounded-lg w-full"
+
+            >
+
+              {ITEM_CATEGORIES.map((cat) => (
+
+                <option key={cat} value={cat}>
+
+                  {cat}
+
+                </option>
+
+              ))}
+
+            </select>
+
+            <button
+
+              type="submit"
+
+              disabled={isUploading}
+
+              className="flex items-center justify-center gap-2 bg-blue-600 text-white px-5 py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:bg-gray-400"
+
+            >
+
+              <Plus size={18} /> {isUploading ? 'Converting...' : 'Add'}
+
+            </button>
+
+          </div>
+
+        </form>
+
+      </div>
+
+
+      {/* Wardrobe Display */}
+
+      <h2 className="text-2xl font-semibold mb-4 text-gray-800">My Wardrobe</h2>
+
+      {loading ? (
+
+        renderLoading()
+
+      ) : (
+
+        <div className="space-y-6">
+
+          {items.length === 0 && (
+
+            <p className="text-gray-500 text-center p-8">
+
+              Your wardrobe is empty. Add some items above!
+
+            </p>
+
+          )}
+
+          {Object.entries(itemsByCategory)
+
+            .sort(
+
+              ([catA], [catB]) =>
+
+                ITEM_CATEGORIES.indexOf(catA) - ITEM_CATEGORIES.indexOf(catB)
+
+            )
+
+            .map(([category, catItems]) => (
+
+              <div key={category}>
+
+                <h3 className="text-xl font-semibold mb-3 text-gray-700">
+
+                  {category}
+
+                </h3>
+
+                {/* UPDATED: More columns for smaller images */}
+
+                 <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-10 lg:grid-cols-12 gap-2">
+
+                  {catItems.map((item) => (
+
+                    <div
+
+                      key={item.id}
+
+                      className="bg-white rounded-lg shadow-md overflow-hidden group relative"
+
+                    >
+
+                      <ImageWithFallback
+
+                        src={item.imageUrl}
+
+                        alt={item.name}
+
+                        className="rounded-t-lg" // Pass rounded class
+
+                      />
+
+                      <div className="p-3">
+
+                        <p className="font-medium text-gray-800 truncate">
+
+                          {item.name}
+
+                        </p>
+
+                      </div>
+
+                      <button
+
+                        onClick={() => handleDeleteItem(item.id)}
+
+                        className="absolute top-2 right-2 bg-red-600 text-white p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-700"
+
+                        aria-label="Delete item"
+
+                      >
+
+                        <Trash2 size={16} />
+
+                      </button>
+
+                    </div>
+
+                  ))}
+
+                </div>
+
+              </div>
+
+            ))}
+
+        </div>
+
+      )}
+
+    </div>
+
+  );
+
+
+  /**
+
+   * Reusable grid for displaying items
+
+   */
+
+  const ItemGrid = ({ items, onSelectItem, title, isSelectable = true }) => (
+
+    <div>
+
+      <h3 className="text-xl font-semibold mb-3 text-gray-700">{title}</h3>
+
+      {items.length === 0 && (
+
+        <p className="text-gray-500">
+
+          No items found in this category. Add some in the 'Wardrobe' tab!
+
+        </p>
+
+      )}
+
+      {/* UPDATED: More columns for smaller images */}
+
+      <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-10 lg:grid-cols-12 gap-2">
+
+        {items.map((item) => (
+
+          <div
+
+            key={item.id}
+
+            onClick={() => isSelectable && onSelectItem(item.id)}
+
+            className={`bg-white rounded-lg shadow-md overflow-hidden group relative text-left ${
+
+              isSelectable
+
+                ? 'cursor-pointer border-2 border-transparent hover:border-blue-500 transition'
+
+                : 'border-2 border-transparent'
+
+            }`}
+
+          >
+
+            <ImageWithFallback
+
+              src={item.imageUrl}
+
+              alt={item.name}
+
+              className="rounded-t-lg"
+
+            />
+
+            <div className="p-3">
+
+              <p className="font-medium text-gray-800 truncate">{item.name}</p>
+
+            </div>
+
+          </div>
+
+        ))}
+
+      </div>
+
+    </div>
+
+  );
+
+
+  /**
+
+   * Reusable component for showing the selected item in Pairings
+
+   */
+
+  const SelectedItemDisplay = ({ itemId, items, onClear, title }) => {
+
+    const item = items.find((i) => i.id === itemId);
+
+    if (!item) return null;
+
+
+    return (
+
+      <div className="mb-6 p-4 bg-white rounded-lg shadow">
+
+        <h3 className="text-xl font-semibold mb-3 text-gray-700">{title}</h3>
+
+        <div className="flex gap-4 items-center">
+
+          <div className="w-24 h-24 rounded-lg overflow-hidden border flex-shrink-0">
+
+            <ImageWithFallback
+
+              src={item.imageUrl}
+
+              alt={item.name}
+
+              className="h-full rounded-lg" // h-full to fill parent
+
+            />
+
+          </div>
+
+          <div>
+
+            <p className="font-semibold text-lg text-gray-800">{item.name}</p>
+
+            <button
+
+              onClick={onClear}
+
+              className="text-sm text-blue-600 hover:underline"
+
+            >
+
+              Clear Selection
+
+            </button>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    );
+
+  };
+
+
+  /**
+
+   * Render the 'Outfits' view
+
+   */
+
+  const renderOutfitsView = () => (
+
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+
+      {/* Create New Outfit */}
+
+      <div className="lg:col-span-2 bg-white p-6 rounded-lg shadow-md">
+
+        <h2 className="text-2xl font-semibold mb-4 text-gray-800">
+
+          Create New Outfit
+
+        </h2>
+
+        <form onSubmit={handleSaveOutfit} className="space-y-6">
+
+          <div className="flex gap-4">
+
+            <input
+
+              type="text"
+
+              value={newOutfitName}
+
+              onChange={(e) => setNewOutfitName(e.target.value)}
+
+              placeholder="Outfit Name (e.g., 'Beach Day')"
+
+              className="p-3 border border-gray-300 rounded-lg w-full"
+
+              required
+
+            />
+
+            <button
+
+              type="submit"
+
+              disabled={selectedItemIds.length === 0}
+
+              className="flex items-center justify-center gap-2 bg-green-600 text-white px-5 py-3 rounded-lg font-medium hover:bg-green-700 transition-colors disabled:bg-gray-400"
+
+            >
+
+              <Plus size={18} /> Save Outfit
+
+            </button>
+
+          </div>
+
+
+          <h3 className="text-xl font-semibold text-gray-700">Select Items:</h3>
+
+          {items.length === 0 && (
+
+            <p className="text-gray-500 text-center p-8">
+
+              You need to add items to your 'Wardrobe' first!
+
+            </p>
+
+          )}
+
+          <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+
+            {Object.entries(itemsByCategory)
+
+              .sort(
+
+                ([catA], [catB]) =>
+
+                  ITEM_CATEGORIES.indexOf(catA) - ITEM_CATEGORIES.indexOf(catB)
+
+              )
+
+              .map(([category, catItems]) => (
+
+                <div key={category}>
+
+                  <h4 className="text-lg font-semibold mb-2 text-gray-600">
+
+                    {category}
+
+                  </h4>
+
+                  {/* UPDATED: More columns for smaller images */}
+
+                   <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-10 lg:grid-cols-12 gap-2">
+
+                    {catItems.map((item) => (
+
+                      <button
+
+                        type="button"
+
+                        key={item.id}
+
+                        onClick={() => toggleItemSelection(item.id)}
+
+                        className={`rounded-lg overflow-hidden shadow-sm border-4 transition-all ${
+
+                          selectedItemIds.includes(item.id)
+
+                            ? 'border-blue-500'
+
+                            : 'border-transparent'
+
+                        }`}
+
+                      >
+
+                        <ImageWithFallback
+
+                          src={item.imageUrl}
+
+                          alt={item.name}
+
+                          className="rounded-t-lg"
+
+                        />
+
+                        <div className="p-2 bg-white">
+
+                          <p className="font-medium text-sm text-gray-800 truncate">
+
+                            {item.name}
+
+                          </p>
+
+                        </div>
+
+                        {selectedItemIds.includes(item.id) && (
+
+                          <div className="absolute inset-0 bg-blue-500 bg-opacity-50 flex items-center justify-center">
+
+                            <Check size={32} className="text-white" />
+
+                          </div>
+
+                        )}
+
+                      </button>
+
+                    ))}
+
+                  </div>
+
+                </div>
+
+              ))}
+
+          </div>
+
+        </form>
+
+      </div>
+
+
+      {/* Saved Outfits List */}
+
+      <div className="bg-white p-6 rounded-lg shadow-md lg:col-span-1">
+
+        <h2 className="text-2xl font-semibold mb-4 text-gray-800">
+
+          My Outfits
+
+        </h2>
+
+        <div className="space-y-4 max-h-[80vh] overflow-y-auto pr-2">
+
+          {outfits.length === 0 && (
+
+            <p className="text-gray-500 text-center p-8">
+
+              You haven't saved any outfits yet.
+
+            </p>
+
+          )}
+
+          {outfitsWithItems.map((outfit) => (
+
+            <div
+
+              key={outfit.id}
+
+              className="border border-gray-200 rounded-lg p-4"
+
+            >
+
+              <div className="flex justify-between items-center mb-3">
+
+                <h3 className="text-lg font-semibold text-gray-800">
+
+                  {outfit.name}
+
+                </h3>
+
+                <button
+
+                  onClick={() => handleDeleteOutfit(outfit.id)}
+
+                  className="text-red-600 hover:text-red-700 p-1"
+
+                  aria-label="Delete outfit"
+
+                >
+
+                  <Trash2 size={18} />
+
+                </button>
+
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+
+                {outfit.items.length === 0 && (
+
+                  <p className="text-sm text-gray-500">
+
+                    Items for this outfit were deleted.
+
+                  </p>
+
+                )}
+
+                {outfit.items.map((item) => (
+
+                  <div
+
+                    key={item.id}
+
+                    className="w-16 h-16 rounded-md overflow-hidden border flex-shrink-0"
+
+                    title={item.name}
+
+                  >
+
+                    <ImageWithFallback
+
+                      src={item.imageUrl}
+
+                      alt={item.name}
+
+                      className="h-full rounded-md" // h-full to fill parent
+
+                    />
+
+                  </div>
+
+                ))}
+
+              </div>
+
+            </div>
+
+          ))}
+
+        </div>
+
+      </div>
+
+    </div>
+
+  );
+
+
+  /**
+
+   * Render the 'Find Pairings' view
+
+   */
+
+  const renderPairingsView = () => (
+
+    <div className="space-y-12">
+
+      {/* Section 1: Find Bottoms for a Top */}
+
+      <section>
+
+        <h2 className="text-2xl font-semibold mb-4 text-gray-800">
+
+          Find Bottoms for your Top
+
+        </h2>
+
+        {!selectedTopId && !selectedBottomId && ( // Only show selector if nothing is selected
+
+          <ItemGrid
+
+            items={tops}
+
+            onSelectItem={handleSelectTop}
+
+            title="First, select a Top:"
+
+            isSelectable={true}
+
+          />
+
+        )}
+
+        {selectedTopId && ( // Show results if a top is selected
+
+          <div>
+
+            <SelectedItemDisplay
+
+              itemId={selectedTopId}
+
+              items={tops}
+
+              onClear={clearPairingSelection}
+
+              title="Selected Top:"
+
+            />
+
+            <ItemGrid
+
+              items={bottoms}
+
+              title="Suggested Bottoms:"
+
+              isSelectable={false}
+
+            />
+
+          </div>
+
+        )}
+
+      </section>
+
+
+      <div className="border-t border-gray-300 my-8"></div>
+
+
+      {/* Section 2: Find Tops for a Bottom */}
+
+      <section>
+
+        <h2 className="text-2xl font-semibold mb-4 text-gray-800">
+
+          Find Tops for your Bottom
+
+        </h2>
+
+        {!selectedTopId && !selectedBottomId && ( // Only show selector if nothing is selected
+
+          <ItemGrid
+
+            items={bottoms}
+
+            onSelectItem={handleSelectBottom}
+
+            title="First, select a Bottom:"
+
+            isSelectable={true}
+
+          />
+
+        )}
+
+        {selectedBottomId && ( // Show results if a bottom is selected
+
+          <div>
+
+            <SelectedItemDisplay
+
+              itemId={selectedBottomId}
+
+              items={bottoms}
+
+              onClear={clearPairingSelection}
+
+              title="Selected Bottom:"
+
+            />
+
+            <ItemGrid
+
+              items={tops}
+
+              title="Suggested Tops:"
+
+              isSelectable={false}
+
+            />
+
+          </div>
+
+        )}
+
+      </section>
+
+    </div>
+
+  );
+
+
+  /**
+
+   * Render the 'Generate' view
+
+   */
+
+  const renderGeneratorView = () => (
+
+    <div className="text-center max-w-2xl mx-auto">
+
+      <h2 className="text-2xl font-semibold mb-6 text-gray-800">
+
+        Outfit Generator
+
+      </h2>
+
+      <button
+
+        onClick={handleGenerateOutfit}
+
+        className="flex items-center justify-center gap-2 bg-purple-600 text-white px-8 py-4 rounded-lg font-medium text-lg hover:bg-purple-700 transition-colors shadow-lg"
+
+      >
+
+        <Shuffle size={20} /> Generate My Outfit
+
+      </button>
+
+
+      {generatorError && (
+
+        <div
+
+          className="mt-6 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 rounded-lg text-left"
+
+          role="alert"
+
+        >
+
+          <p className="font-bold">Heads up!</p>
+
+          <p>{generatorError}</p>
+
+        </div>
+
+      )}
+
+
+      {generatedOutfit && (
+
+        <div className="mt-10">
+
+          <h3 className="text-2xl font-semibold mb-6 text-gray-700">
+
+            Here's your outfit!
+
+          </h3>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+
+            {Object.entries(generatedOutfit).map(([category, item]) => (
+
+              <div
+
+                key={category}
+
+                className="bg-white rounded-lg shadow-md overflow-hidden"
+
+              >
+
+                <ImageWithFallback
+
+                  src={item.imageUrl}
+
+                  alt={item.name}
+
+                  className="rounded-t-lg"
+
+                />
+
+                <div className="p-4">
+
+                  <p className="font-semibold text-sm uppercase text-gray-500">
+
+                    {category}
+
+                  </p>
+
+                  <p className="font-bold text-lg text-gray-800">
+
+                    {item.name}
+
+                  </p>
+
+                </div>
+
+              </div>
+
+            ))}
+
+          </div>
+
+        </div>
+
+      )}
+
+    </div>
+
+  );
+
+
+  // --- Main App Render ---
+
+
+  if (loading && items.length === 0) {
+
+    return (
+
+      <div className="flex items-center justify-center min-h-screen bg-gray-100">
+
+        <p className="text-gray-600">Initializing your wardrobe...</p>
+
+      </div>
+
+    );
+
+  }
+
+
+  return (
+
+    <div className="min-h-screen bg-gray-100 font-inter p-4 md:p-8">
+
+      <div className="max-w-7xl mx-auto">
+
+        {/* Header and Navigation */}
+
+        <header className="flex flex-col md:flex-row justify-between items-center mb-6">
+
+          <h1 className="text-3xl font-bold text-gray-800">
+
+            My Virtual Wardrobe
+
+          </h1>
+
+          <nav className="flex flex-wrap justify-center md:justify-end gap-2 mt-4 md:mt-0">
+
+            {[
+
+              { id: 'wardrobe', label: 'Wardrobe', icon: Package },
+
+              { id: 'outfits', label: 'Outfits', icon: Clapperboard },
+
+              { id: 'pairings', label: 'Find Pairings', icon: Link },
+
+              { id: 'generate', label: 'Generator', icon: Shuffle },
+
+            ].map((tab) => {
+
+              const Icon = tab.icon;
+
+              const isActive = currentView === tab.id;
+
+              return (
+
+                <button
+
+                  key={tab.id}
+
+                  onClick={() => changeView(tab.id)}
+
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+
+                    isActive
+
+                      ? 'bg-blue-600 text-white'
+
+                      : 'text-gray-600 hover:bg-gray-200'
+
+                  }`}
+
+                >
+
+                  <Icon size={18} />
+
+                  {tab.label}
+
+                </button>
+
+              );
+
+            })}
+
+          </nav>
+
+        </header>
+
+
+        {/* Main Content Area */}
+
+        <main>
+
+          {currentView === 'wardrobe' && renderWardrobeView()}
+
+          {currentView === 'outfits' && renderOutfitsView()}
+
+          {currentView === 'pairings' && renderPairingsView()}
+
+          {currentView === 'generate' && renderGeneratorView()}
+
+        </main>
+
+
+        {/* Footer (Removido o User ID) */}
+
+        <footer className="mt-12 text-center text-gray-500 text-xs">
+
+          <p>App a correr 100% localmente.</p>
+
+        </footer>
+
+      </div>
+
+    </div>
+
+  );
+
+} 
