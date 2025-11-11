@@ -3,6 +3,6 @@ import react from '@vitejs/plugin-react'
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  base: '/Wardrobe-App/',  // <--- ADD THIS LINE
+  base: '/Wardrobe-App/',
   plugins: [react()],
 })
